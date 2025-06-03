@@ -21,17 +21,20 @@ ContactosAPP es una aplicación de escritorio que permite gestionar contactos de
 ## Instalación
 
 1. Clona este repositorio
+
    ```
    git clone https://github.com/edfrutos/ContactosAPP.git
    cd ContactosAPP
    ```
 
 2. Instala las dependencias
+
    ```
    pip install -r requirements.txt
    ```
 
 3. Ejecuta la aplicación
+
    ```
    python contactos_mejorado.py
    ```
