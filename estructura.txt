@@ -1,0 +1,5 @@
+ContactosApp/
+│
+├── contactos_mejorado.py
+├── setup.py
+└── contactos.json   (opcional, si quieres empaquetar un archivo inicial)
