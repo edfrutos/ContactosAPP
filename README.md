@@ -4,7 +4,7 @@ Una aplicación de gestión de contactos desarrollada en Python con interfaz gr�
 
 ## Descripción
 
-ContactosAPP es una aplicación de escritorio que permite gestionar contactos de manera sencilla y eficiente. Diseñada con Python y tkinter (la biblioteca estándar de GUI incluida con Python) para la interfaz gráfica.
+ContactosAPP es una aplicación de escritorio que permite gestionar contactos de manera sencilla y eficiente. Diseñada con Python y `tkinter` (la biblioteca estándar de GUI incluida con Python) para la interfaz gráfica.
 
 ## Características
 
@@ -15,8 +15,8 @@ ContactosAPP es una aplicación de escritorio que permite gestionar contactos de
 
 ## Requisitos
 
-- Python 3.6 o superior (incluye tkinter por defecto)
-- py2app (para empaquetado en macOS)
+- Python 3.6 o superior (incluye `tkinter` por defecto)
+- `py2app` (para empaquetado en macOS)
 
 ## Instalación
 
@@ -49,8 +49,8 @@ python setup.py py2app
 
 ## Licencia
 
-MIT License
+MIT
 
 ## Autor
 
-Edfrutos
+E. de Frutos
