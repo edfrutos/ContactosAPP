@@ -22,20 +22,20 @@ ContactosAPP es una aplicación de escritorio que permite gestionar contactos de
 
 1. Clona este repositorio
 
-   ```
+   ```bash
    git clone https://github.com/edfrutos/ContactosAPP.git
    cd ContactosAPP
    ```
 
 2. Instala las dependencias
 
-   ```
+   ```bash
    pip install -r requirements.txt
    ```
 
 3. Ejecuta la aplicación
 
-   ```
+   ```bash
    python contactos_mejorado.py
    ```
 
@@ -43,7 +43,7 @@ ContactosAPP es una aplicación de escritorio que permite gestionar contactos de
 
 Para crear una aplicación ejecutable en macOS:
 
-```
+```bash
 python setup.py py2app
 ```
 
