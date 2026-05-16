@@ -47,7 +47,7 @@ El proyecto mantiene una única variante activa:
 
 Flujo de datos: `contactos.json` → `ContactosApp._cargar()` → `self.contactos` → `ContactosApp._guardar()` → `contactos.json`.
 
-La importación de contactos soporta Google Contacts en CSV y Apple Contacts en vCard (`.vcf` / `.vcard`). Los duplicados se detectan por email o teléfono normalizados y se pide confirmación para fusionar u omitir.
+La importación de contactos soporta Google Contacts en CSV y Apple Contacts en vCard (`.vcf` / `.vcard`). Los duplicados se detectan por email o teléfono normalizados. Los campos vacíos locales se completan automáticamente y, si hay conflictos, la UI permite fusionar un contacto, fusionar todos, guardar ambos o elegir si prevalece el dato local o el importado. Si el archivo importado trae campos nuevos, se añaden al esquema JSON de todos los contactos.
 
 ## Datos
 

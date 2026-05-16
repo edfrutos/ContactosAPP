@@ -49,6 +49,9 @@ Icon
 
 # Datos locales sensibles
 contactos.json
+contactos_*.json
+contactos-*.json
+!contactos_example.json
 *.csv
 *.vcf
 *.vcard

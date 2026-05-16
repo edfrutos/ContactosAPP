@@ -17,6 +17,7 @@ def _ruta_contactos():
 
 
 CONTACTOS_FILE = _ruta_contactos()
+BASE_FIELDS = ("nombre", "teléfono", "email")
 
 COLORS = {
     "bg":           "#F5F7FA",
@@ -43,6 +44,7 @@ class ContactosApp:
     def __init__(self, root):
         self.root = root
         self.contactos = self._cargar()
+        self.campos = self._asegurar_campos(self.contactos)
         self._modo_edicion = False
         self._idx_edicion = None  # índice real en self.contactos
 
@@ -60,9 +62,33 @@ class ContactosApp:
             return json.load(f)
 
     def _guardar(self):
-        self.contactos.sort(key=lambda c: c["nombre"].lower())
+        self.campos = self._asegurar_campos(self.contactos)
+        self.contactos.sort(key=lambda c: c.get("nombre", "").lower())
         with open(CONTACTOS_FILE, "w", encoding="utf-8") as f:
             json.dump(self.contactos, f, indent=4, ensure_ascii=False)
+
+    @staticmethod
+    def _campos_desde_contactos(contactos):
+        campos = list(BASE_FIELDS)
+        for contacto in contactos:
+            for campo in contacto:
+                if campo not in campos:
+                    campos.append(campo)
+        return campos
+
+    def _asegurar_campos(self, contactos):
+        campos = self._campos_desde_contactos(contactos)
+        for contacto in contactos:
+            for campo in campos:
+                contacto.setdefault(campo, "")
+        return campos
+
+    def _ampliar_esquema(self, nuevos):
+        campos = self._campos_desde_contactos(self.contactos + nuevos)
+        for contacto in self.contactos + nuevos:
+            for campo in campos:
+                contacto.setdefault(campo, "")
+        self.campos = campos
 
     # ── Importación de contactos ────────────────────────────────────────────────
 
@@ -112,6 +138,12 @@ class ContactosApp:
             if valor:
                 return valor
         return ""
+
+    @staticmethod
+    def _normalizar_nombre_campo(valor):
+        valor = (valor or "").strip()
+        valor = re.sub(r"\s+", " ", valor)
+        return valor[:1].lower() + valor[1:] if valor else ""
 
     @staticmethod
     def _normalizar_cabecera_csv(clave):
@@ -181,8 +213,29 @@ class ContactosApp:
                 ))
                 contacto = self._preparar_contacto(nombre, telefono, email)
                 if contacto:
+                    self._añadir_campos_extra_csv(contacto, row)
                     contactos.append(contacto)
         return contactos
+
+    def _añadir_campos_extra_csv(self, contacto, row):
+        for clave, valor in row.items():
+            valor = self._normalizar_texto(valor)
+            campo = self._normalizar_nombre_campo(clave)
+            if not valor or not campo:
+                continue
+            campo_norm = self._normalizar_cabecera_csv(campo)
+            if campo_norm in {
+                "name", "full name", "nombre", "nombre completo",
+                "display name", "nombre para mostrar", "given name",
+                "first name", "nombre de pila", "additional name",
+                "middle name", "segundo nombre", "family name",
+                "last name", "apellidos",
+            }:
+                continue
+            if valor in (contacto.get("teléfono"), contacto.get("email")):
+                continue
+            if campo not in contacto:
+                contacto[campo] = valor
 
     def _contactos_desde_vcard(self, ruta):
         with open(ruta, "r", encoding="utf-8-sig", errors="replace") as f:
@@ -193,13 +246,25 @@ class ContactosApp:
         en_vcard = False
         for linea in lineas:
             if linea.upper() == "BEGIN:VCARD":
-                actual = {}
+                actual = {"tel": [], "email": []}
                 en_vcard = True
                 continue
             if linea.upper() == "END:VCARD":
                 nombre = actual.get("fn") or actual.get("n", "")
-                contacto = self._preparar_contacto(nombre, actual.get("tel", ""), actual.get("email", ""))
+                telefonos = actual.get("tel") or []
+                emails = actual.get("email") or []
+                contacto = self._preparar_contacto(
+                    nombre,
+                    telefonos[0] if telefonos else "",
+                    emails[0] if emails else "",
+                )
                 if contacto:
+                    for i, telefono in enumerate(telefonos[1:], start=2):
+                        contacto[f"teléfono {i}"] = telefono
+                    for i, email in enumerate(emails[1:], start=2):
+                        contacto[f"email {i}"] = email
+                    for campo, valor in actual.get("extras", {}).items():
+                        contacto[campo] = valor
                     contactos.append(contacto)
                 actual = {}
                 en_vcard = False
@@ -222,11 +287,27 @@ class ContactosApp:
                 prefijo = partes[3] if len(partes) > 3 else ""
                 sufijo = partes[4] if len(partes) > 4 else ""
                 actual["n"] = " ".join(p for p in (prefijo, nombre, adicional, familia, sufijo) if p).strip()
-            elif clave_base == "TEL" and not actual.get("tel"):
-                actual["tel"] = valor
-            elif clave_base == "EMAIL" and not actual.get("email"):
-                actual["email"] = valor
+            elif clave_base == "TEL":
+                actual.setdefault("tel", []).append(valor)
+            elif clave_base == "EMAIL":
+                actual.setdefault("email", []).append(valor)
+            elif clave_base not in {"BEGIN", "END", "VERSION", "PRODID"}:
+                campo = self._campo_extra_vcard(clave_base)
+                if campo and valor:
+                    actual.setdefault("extras", {}).setdefault(campo, valor)
         return contactos
+
+    @staticmethod
+    def _campo_extra_vcard(clave):
+        return {
+            "ORG": "empresa",
+            "TITLE": "cargo",
+            "ADR": "dirección",
+            "NOTE": "notas",
+            "URL": "web",
+            "BDAY": "cumpleaños",
+            "NICKNAME": "alias",
+        }.get(clave, clave.lower())
 
     def _preparar_contacto(self, nombre, telefono, email):
         nombre = self._normalizar_texto(nombre)
@@ -254,14 +335,96 @@ class ContactosApp:
         return None
 
     @staticmethod
-    def _fusionar_contactos(existente, nuevo):
+    def _campos_conflictivos(existente, nuevo):
+        conflictos = []
+        for campo in set(existente) | set(nuevo):
+            local = (existente.get(campo) or "").strip()
+            importado = (nuevo.get(campo) or "").strip()
+            if local and importado and not ContactosApp._valores_equivalentes(campo, local, importado):
+                conflictos.append(campo)
+        return conflictos
+
+    @staticmethod
+    def _valores_equivalentes(campo, local, importado):
+        campo_norm = ContactosApp._normalizar_cabecera_csv(campo)
+        if "email" in campo_norm or "e-mail" in campo_norm or "correo" in campo_norm:
+            return ContactosApp._normalizar_email(local) == ContactosApp._normalizar_email(importado)
+        if "telefono" in campo_norm or "phone" in campo_norm or "movil" in campo_norm:
+            return ContactosApp._telefonos_equivalentes(
+                ContactosApp._normalizar_telefono(local),
+                ContactosApp._normalizar_telefono(importado),
+            )
+        return local == importado
+
+    @staticmethod
+    def _fusionar_contactos(existente, nuevo, preferencia="local"):
         fusionado = existente.copy()
-        for campo in ("nombre", "teléfono", "email"):
-            if not fusionado.get(campo) and nuevo.get(campo):
+        for campo in set(existente) | set(nuevo):
+            local = (fusionado.get(campo) or "").strip()
+            importado = (nuevo.get(campo) or "").strip()
+            if not local and importado:
                 fusionado[campo] = nuevo[campo]
-        if len(nuevo.get("nombre", "")) > len(fusionado.get("nombre", "")):
-            fusionado["nombre"] = nuevo["nombre"]
+            elif local and importado and not ContactosApp._valores_equivalentes(campo, local, importado) and preferencia == "importado":
+                fusionado[campo] = nuevo[campo]
         return fusionado
+
+    def _dialogo_opciones(self, titulo, mensaje, opciones):
+        ventana = tk.Toplevel(self.root)
+        ventana.title(titulo)
+        ventana.transient(self.root)
+        ventana.grab_set()
+        ventana.resizable(False, False)
+
+        resultado = {"valor": None}
+        marco = ttk.Frame(ventana, padding=16)
+        marco.grid(row=0, column=0, sticky="nsew")
+        ttk.Label(marco, text=mensaje, justify="left", wraplength=560).grid(row=0, column=0, columnspan=len(opciones), sticky="w")
+
+        def elegir(valor):
+            resultado["valor"] = valor
+            ventana.destroy()
+
+        for col, (texto, valor) in enumerate(opciones):
+            ttk.Button(marco, text=texto, command=lambda v=valor: elegir(v)).grid(row=1, column=col, padx=(0, 8), pady=(14, 0))
+
+        ventana.protocol("WM_DELETE_WINDOW", lambda: elegir(None))
+        ventana.update_idletasks()
+        x = self.root.winfo_rootx() + (self.root.winfo_width() - ventana.winfo_width()) // 2
+        y = self.root.winfo_rooty() + (self.root.winfo_height() - ventana.winfo_height()) // 2
+        ventana.geometry(f"+{max(x, 0)}+{max(y, 0)}")
+        self.root.wait_window(ventana)
+        return resultado["valor"]
+
+    def _preguntar_duplicado(self, existente, nuevo, conflictos):
+        campos = ", ".join(conflictos[:6])
+        if len(conflictos) > 6:
+            campos += f" y {len(conflictos) - 6} más"
+        return self._dialogo_opciones(
+            "Duplicado detectado",
+            "Ya existe un contacto parecido:\n\n"
+            f"Existente: {existente.get('nombre', '')} | {existente.get('teléfono', '')} | {existente.get('email', '')}\n"
+            f"Importado: {nuevo.get('nombre', '')} | {nuevo.get('teléfono', '')} | {nuevo.get('email', '')}\n\n"
+            f"Campos con conflicto: {campos}",
+            (
+                ("Fusionar este", "fusionar"),
+                ("Guardar ambos", "guardar_ambos"),
+                ("Omitir", "omitir"),
+                ("Fusionar todo", "fusionar_todo"),
+                ("Cancelar", "cancelar"),
+            ),
+        )
+
+    def _preguntar_preferencia_fusion(self):
+        return self._dialogo_opciones(
+            "Criterio de fusión",
+            "Para los campos que tengan valores distintos en local e importado, elige qué dato debe conservarse.\n\n"
+            "Los campos vacíos en local se rellenarán siempre con el dato importado sin preguntar.",
+            (
+                ("Mantener local", "local"),
+                ("Usar importado", "importado"),
+                ("Cancelar", None),
+            ),
+        )
 
     def _importar_contactos(self):
         ruta = filedialog.askopenfilename(
@@ -294,7 +457,9 @@ class ContactosApp:
             messagebox.showwarning("Sin contactos", "No se encontraron contactos válidos en el archivo.", parent=self.root)
             return
 
-        añadidos = fusionados = omitidos = 0
+        self._ampliar_esquema(nuevos)
+        añadidos = guardados_ambos = fusionados = fusionados_auto = omitidos = 0
+        preferencia_global = None
         for nuevo in nuevos:
             idx = self._indice_duplicado(nuevo)
             if idx is None:
@@ -303,28 +468,45 @@ class ContactosApp:
                 continue
 
             existente = self.contactos[idx]
-            decision = messagebox.askyesnocancel(
-                "Duplicado detectado",
-                "Ya existe un contacto parecido:\n\n"
-                f"Existente: {existente.get('nombre')} | {existente.get('teléfono')} | {existente.get('email')}\n"
-                f"Importado: {nuevo.get('nombre')} | {nuevo.get('teléfono')} | {nuevo.get('email')}\n\n"
-                "Sí: fusionar completando campos vacíos.\n"
-                "No: omitir el contacto importado.\n"
-                "Cancelar: detener la importación.",
-                parent=self.root,
-            )
-            if decision is None:
+            conflictos = self._campos_conflictivos(existente, nuevo)
+            if not conflictos:
+                self.contactos[idx] = self._fusionar_contactos(existente, nuevo, "local")
+                fusionados_auto += 1
+                continue
+
+            preferencia = preferencia_global
+            if not preferencia:
+                decision = self._preguntar_duplicado(existente, nuevo, conflictos)
+                if decision in (None, "cancelar"):
+                    break
+                if decision == "guardar_ambos":
+                    self.contactos.append(nuevo)
+                    guardados_ambos += 1
+                    continue
+                if decision == "omitir":
+                    omitidos += 1
+                    continue
+                if decision == "fusionar_todo":
+                    preferencia_global = self._preguntar_preferencia_fusion()
+                    if not preferencia_global:
+                        break
+                    preferencia = preferencia_global
+                else:
+                    preferencia = self._preguntar_preferencia_fusion()
+
+            if not preferencia:
                 break
-            if decision:
-                self.contactos[idx] = self._fusionar_contactos(existente, nuevo)
-                fusionados += 1
-            else:
-                omitidos += 1
+
+            self.contactos[idx] = self._fusionar_contactos(existente, nuevo, preferencia)
+            fusionados += 1
 
         self._guardar()
         self._limpiar_formulario()
         self._actualizar_lista(self.entry_busqueda.get())
-        self._flash_status(f"✓  {añadidos} añadidos, {fusionados} fusionados, {omitidos} omitidos.")
+        self._flash_status(
+            f"✓  {añadidos} añadidos, {guardados_ambos} guardados como nuevos, "
+            f"{fusionados + fusionados_auto} fusionados, {omitidos} omitidos."
+        )
 
     # ── Validación ───────────────────────────────────────────────────────────────
 
@@ -355,10 +537,14 @@ class ContactosApp:
             return
 
         if self._modo_edicion and self._idx_edicion is not None:
-            self.contactos[self._idx_edicion] = {"nombre": nombre, "teléfono": telefono, "email": email}
+            contacto = self.contactos[self._idx_edicion].copy()
+            contacto.update({"nombre": nombre, "teléfono": telefono, "email": email})
+            self.contactos[self._idx_edicion] = contacto
             self._flash_status(f"✓  '{nombre}' actualizado correctamente.")
         else:
-            self.contactos.append({"nombre": nombre, "teléfono": telefono, "email": email})
+            contacto = {campo: "" for campo in self.campos}
+            contacto.update({"nombre": nombre, "teléfono": telefono, "email": email})
+            self.contactos.append(contacto)
             self._flash_status(f"✓  '{nombre}' añadido correctamente.")
 
         self._guardar()
@@ -370,8 +556,8 @@ class ContactosApp:
         if not item:
             messagebox.showwarning("Sin selección", "Selecciona un contacto para eliminarlo.", parent=self.root)
             return
-        idx = int(self.lista.item(item)["values"][3])
-        nombre = self.contactos[idx]["nombre"]
+        idx = int(self.lista.item(item)["values"][-1])
+        nombre = self.contactos[idx].get("nombre", "")
         if messagebox.askyesno(
             "Confirmar eliminación",
             f"¿Eliminar el contacto '{nombre}'?\nEsta acción no se puede deshacer.",
@@ -393,38 +579,48 @@ class ContactosApp:
             return
         with open(ruta, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
-            writer.writerow(["Nombre", "Teléfono", "Email"])
+            self.campos = self._asegurar_campos(self.contactos)
+            writer.writerow(self.campos)
             for c in self.contactos:
-                writer.writerow([c["nombre"], c["teléfono"], c["email"]])
+                writer.writerow([c.get(campo, "") for campo in self.campos])
         self._flash_status(f"✓  {len(self.contactos)} contactos exportados a CSV.")
 
     # ── Helpers UI ───────────────────────────────────────────────────────────────
 
     def _actualizar_lista(self, filtro=""):
+        self.campos = self._asegurar_campos(self.contactos)
+        self._configurar_columnas_lista()
         self.lista.delete(*self.lista.get_children())
         filtro_l = filtro.lower()
         visible = 0
         for idx, c in enumerate(self.contactos):
-            if (
-                filtro_l in c["nombre"].lower()
-                or filtro_l in c["teléfono"].lower()
-                or filtro_l in c["email"].lower()
-            ):
+            valores = [c.get(campo, "") for campo in self.campos]
+            if any(filtro_l in str(valor).lower() for valor in valores):
                 tag = "par" if visible % 2 == 0 else "impar"
                 # El índice real se guarda en la columna oculta _idx
-                self.lista.insert("", "end", values=(c["nombre"], c["teléfono"], c["email"], idx), tags=(tag,))
+                self.lista.insert("", "end", values=(*valores, idx), tags=(tag,))
                 visible += 1
         self.lbl_total.config(text=f"{visible} contacto{'s' if visible != 1 else ''}")
+
+    def _configurar_columnas_lista(self):
+        columnas = (*self.campos, "_idx")
+        if tuple(self.lista["columns"]) != columnas:
+            self.lista.configure(columns=columnas, displaycolumns=self.campos)
+        for campo in self.campos:
+            self.lista.heading(campo, text=campo[:1].upper() + campo[1:], anchor="w")
+            ancho = 170 if campo == "nombre" else 145
+            self.lista.column(campo, width=ancho, stretch=True, minwidth=90, anchor="w")
+        self.lista.column("_idx", width=0, stretch=False, minwidth=0)
 
     def _seleccionar_contacto(self, _event=None):
         item = self.lista.focus()
         if not item:
             return
-        idx = int(self.lista.item(item)["values"][3])
+        idx = int(self.lista.item(item)["values"][-1])
         c = self.contactos[idx]
         for entry, valor in zip(
             (self.entry_nombre, self.entry_telefono, self.entry_email),
-            (c["nombre"], c["teléfono"], c["email"]),
+            (c.get("nombre", ""), c.get("teléfono", ""), c.get("email", "")),
         ):
             entry.delete(0, tk.END)
             entry.insert(0, valor)
