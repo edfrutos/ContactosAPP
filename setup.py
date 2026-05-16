@@ -3,7 +3,7 @@ from setuptools import setup
 APP = ['contactos_mejorado.py']
 DATA_FILES = ['contactos.json']  # Opcional
 OPTIONS = {
-    'iconfile': 'contactos.icns',
+    'iconfile': 'contactos_icon.icns',
     'packages': ['tkinter'],
     'includes': ['re', 'json', 'csv', 'os']
 }

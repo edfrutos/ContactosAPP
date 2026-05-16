@@ -5,7 +5,7 @@ APP_NAME="contactos_mejorado"
 APP_PATH="dist/${APP_NAME}.app"
 DMG_NAME="Contactos_Mejorado.dmg"
 VOL_NAME="Contactos Mejorado"
-ICON_FILE="contactos.icns"
+ICON_FILE="contactos_icon.icns"
 BACKGROUND_FILE="background.png"
 
 echo "📦 Verificando archivos requeridos..."
