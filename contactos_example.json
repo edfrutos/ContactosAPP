@@ -1,0 +1,12 @@
+[
+    {
+        "nombre": "Contacto de ejemplo",
+        "teléfono": "+34 600 000 000",
+        "email": "contacto@example.com"
+    },
+    {
+        "nombre": "Solo nombre",
+        "teléfono": "",
+        "email": ""
+    }
+]

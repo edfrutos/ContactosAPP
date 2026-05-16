@@ -2,10 +2,11 @@
 
 ## Project Structure & Module Organization
 
-This repository contains a small macOS desktop contacts app written in Python with Tkinter.
+This repository contains a macOS contacts app written in Python with Tkinter.
 
-- `contactos_mejorado.py`: active application entry point and main development target.
-- `contactos.json`: local JSON data file used by the app.
+- `contactos_mejorado.py`: active app entry point and main development target.
+- `contactos.json`: ignored local JSON data file used by the app.
+- `contactos_example.json`: tracked sample structure with fake data.
 - `setup.py`: `py2app` configuration for building a macOS `.app`.
 - `requirements.txt`: packaging dependency list; currently only `py2app`.
 - `contactos_instalacion_y_paquetizado.sh`, `contactos_empaquetado_final.sh`, `crear_dmg_contactos.sh`: macOS packaging and DMG scripts.
@@ -50,7 +51,7 @@ Use Python 3.6+ compatible code. Keep the current single-file Tkinter structure 
 - Uppercase constants, such as `CONTACTOS_FILE` and `COLORS`.
 - Private UI/helper methods prefixed with `_`.
 
-Prefer standard-library modules already used in the project (`tkinter`, `json`, `csv`, `os`, `re`). Keep UI text consistent with the existing Spanish interface.
+Prefer standard-library modules already used here (`tkinter`, `json`, `csv`, `os`, `re`, `unicodedata`). Keep UI text consistent with the Spanish interface.
 
 ## Testing Guidelines
 
@@ -58,8 +59,11 @@ There is no automated test suite configured. Before submitting changes, manually
 
 - Adding, editing, deleting, and searching contacts.
 - JSON persistence in `contactos.json`.
-- Email and phone validation.
+- Email and phone validation when those fields are present.
 - CSV export.
+- Google Contacts CSV import.
+- Apple Contacts vCard import.
+- Duplicate import handling: merge or skip with user confirmation.
 - Closing behavior with unsaved form data.
 
 If tests are added later, place them under `tests/` and use descriptive names like `test_contact_validation.py`.
@@ -77,4 +81,4 @@ Pull requests should include:
 
 ## Security & Configuration Tips
 
-Do not commit personal contact data. Treat `contactos.json` as sample/local data unless intentionally updating fixtures. Avoid destructive packaging script changes without documenting their effect on `build/`, `dist/`, or generated DMG files.
+Do not commit personal contact data. Keep `contactos.json`, CSV exports, and vCard exports local. Avoid destructive packaging script changes without documenting their effect on `build/`, `dist/`, or generated DMG files.

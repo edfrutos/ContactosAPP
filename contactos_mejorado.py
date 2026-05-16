@@ -4,9 +4,19 @@ import json
 import os
 import csv
 import re
+import sys
+import unicodedata
 
-# Ruta absoluta al lado del script, independiente del CWD
-CONTACTOS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "contactos.json")
+
+def _ruta_contactos():
+    if getattr(sys, "frozen", False):
+        app_dir = os.path.join(os.path.expanduser("~/Library/Application Support"), "ContactosAPP")
+        os.makedirs(app_dir, exist_ok=True)
+        return os.path.join(app_dir, "contactos.json")
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "contactos.json")
+
+
+CONTACTOS_FILE = _ruta_contactos()
 
 COLORS = {
     "bg":           "#F5F7FA",
@@ -54,6 +64,268 @@ class ContactosApp:
         with open(CONTACTOS_FILE, "w", encoding="utf-8") as f:
             json.dump(self.contactos, f, indent=4, ensure_ascii=False)
 
+    # ── Importación de contactos ────────────────────────────────────────────────
+
+    @staticmethod
+    def _normalizar_texto(valor):
+        return (valor or "").strip()
+
+    @staticmethod
+    def _normalizar_email(valor):
+        return (valor or "").strip().lower()
+
+    @staticmethod
+    def _normalizar_telefono(valor):
+        return re.sub(r"\D", "", valor or "")
+
+    @staticmethod
+    def _telefonos_equivalentes(a, b):
+        if not a or not b:
+            return False
+        return a == b or (len(a) >= 7 and len(b) >= 7 and (a.endswith(b) or b.endswith(a)))
+
+    @staticmethod
+    def _desplegar_lineas_vcard(texto):
+        lineas = []
+        for linea in texto.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+            if linea.startswith((" ", "\t")) and lineas:
+                lineas[-1] += linea[1:]
+            else:
+                lineas.append(linea)
+        return lineas
+
+    @staticmethod
+    def _desescapar_vcard(valor):
+        return (
+            valor.replace("\\n", "\n")
+            .replace("\\N", "\n")
+            .replace("\\,", ",")
+            .replace("\\;", ";")
+            .replace("\\\\", "\\")
+            .strip()
+        )
+
+    @staticmethod
+    def _primer_valor(row, claves):
+        for clave in claves:
+            valor = (row.get(clave) or "").strip()
+            if valor:
+                return valor
+        return ""
+
+    @staticmethod
+    def _normalizar_cabecera_csv(clave):
+        texto = unicodedata.normalize("NFKD", str(clave or "").replace("\ufeff", ""))
+        texto = "".join(c for c in texto if not unicodedata.combining(c))
+        texto = texto.casefold().strip()
+        return re.sub(r"[\s_]+", " ", texto)
+
+    def _primer_valor_csv(self, row, exactos=(), contiene=()):
+        valores = [
+            (self._normalizar_cabecera_csv(clave), (valor or "").strip())
+            for clave, valor in row.items()
+        ]
+        for buscado in exactos:
+            buscado_norm = self._normalizar_cabecera_csv(buscado)
+            for clave, valor in valores:
+                if valor and clave == buscado_norm:
+                    return valor
+        for tokens in contiene:
+            tokens_norm = [self._normalizar_cabecera_csv(token) for token in tokens]
+            for clave, valor in valores:
+                if valor and all(token in clave for token in tokens_norm):
+                    return valor
+        return ""
+
+    def _contactos_desde_google_csv(self, ruta):
+        contactos = []
+        with open(ruta, "r", encoding="utf-8-sig", newline="") as f:
+            muestra = f.read(4096)
+            f.seek(0)
+            try:
+                dialecto = csv.Sniffer().sniff(muestra, delimiters=",;\t")
+            except csv.Error:
+                dialecto = csv.excel
+            reader = csv.DictReader(f, dialect=dialecto)
+            for row in reader:
+                nombre = self._primer_valor_csv(row, exactos=(
+                    "Name", "Full Name", "Nombre", "Nombre completo",
+                    "Display Name", "Nombre para mostrar",
+                ))
+                if not nombre:
+                    partes = [
+                        self._primer_valor_csv(row, exactos=("Given Name", "First Name", "Nombre de pila")),
+                        self._primer_valor_csv(row, exactos=("Additional Name", "Middle Name", "Segundo nombre")),
+                        self._primer_valor_csv(row, exactos=("Family Name", "Last Name", "Apellidos")),
+                    ]
+                    nombre = " ".join(p for p in partes if p).strip()
+
+                telefono = self._primer_valor_csv(row, exactos=(
+                    "Phone 1 - Value", "Phone 2 - Value", "Phone 3 - Value",
+                    "Teléfono 1 - Valor", "Teléfono 2 - Valor", "Teléfono 3 - Valor",
+                    "Telefono 1 - Valor", "Telefono 2 - Valor", "Telefono 3 - Valor",
+                    "Phone 1 - Formatted", "Teléfono", "Telefono", "Phone", "Mobile Phone",
+                    "Móvil", "Movil", "Teléfono móvil", "Telefono movil",
+                ), contiene=(
+                    ("phone", "value"), ("telefono", "value"), ("telefono", "valor"), ("movil",),
+                ))
+                email = self._primer_valor_csv(row, exactos=(
+                    "E-mail 1 - Value", "E-mail 2 - Value", "E-mail 3 - Value",
+                    "E-mail 1 - Valor", "E-mail 2 - Valor", "E-mail 3 - Valor",
+                    "Correo electrónico 1 - Valor", "Correo electrónico 2 - Valor",
+                    "Correo electronico 1 - Valor", "Correo electronico 2 - Valor",
+                    "Email", "E-mail Address", "Correo electrónico", "Correo electronico",
+                ), contiene=(
+                    ("e-mail", "value"), ("email", "value"), ("e-mail", "valor"),
+                    ("email", "valor"), ("correo", "valor"), ("correo",),
+                ))
+                contacto = self._preparar_contacto(nombre, telefono, email)
+                if contacto:
+                    contactos.append(contacto)
+        return contactos
+
+    def _contactos_desde_vcard(self, ruta):
+        with open(ruta, "r", encoding="utf-8-sig", errors="replace") as f:
+            lineas = self._desplegar_lineas_vcard(f.read())
+
+        contactos = []
+        actual = {}
+        en_vcard = False
+        for linea in lineas:
+            if linea.upper() == "BEGIN:VCARD":
+                actual = {}
+                en_vcard = True
+                continue
+            if linea.upper() == "END:VCARD":
+                nombre = actual.get("fn") or actual.get("n", "")
+                contacto = self._preparar_contacto(nombre, actual.get("tel", ""), actual.get("email", ""))
+                if contacto:
+                    contactos.append(contacto)
+                actual = {}
+                en_vcard = False
+                continue
+            if not en_vcard or ":" not in linea:
+                continue
+
+            clave, valor = linea.split(":", 1)
+            clave = clave.split(";", 1)[0].upper()
+            clave_base = clave.rsplit(".", 1)[-1]
+            valor = self._desescapar_vcard(valor)
+
+            if clave_base == "FN" and not actual.get("fn"):
+                actual["fn"] = valor
+            elif clave_base == "N" and not actual.get("n"):
+                partes = valor.split(";")
+                familia = partes[0] if len(partes) > 0 else ""
+                nombre = partes[1] if len(partes) > 1 else ""
+                adicional = partes[2] if len(partes) > 2 else ""
+                prefijo = partes[3] if len(partes) > 3 else ""
+                sufijo = partes[4] if len(partes) > 4 else ""
+                actual["n"] = " ".join(p for p in (prefijo, nombre, adicional, familia, sufijo) if p).strip()
+            elif clave_base == "TEL" and not actual.get("tel"):
+                actual["tel"] = valor
+            elif clave_base == "EMAIL" and not actual.get("email"):
+                actual["email"] = valor
+        return contactos
+
+    def _preparar_contacto(self, nombre, telefono, email):
+        nombre = self._normalizar_texto(nombre)
+        telefono = self._normalizar_texto(telefono)
+        email = self._normalizar_texto(email)
+        if not nombre:
+            return None
+        return {"nombre": nombre, "teléfono": telefono, "email": email}
+
+    def _indice_duplicado(self, nuevo):
+        nuevo_email = self._normalizar_email(nuevo.get("email"))
+        nuevo_tel = self._normalizar_telefono(nuevo.get("teléfono"))
+        nuevo_nombre = nuevo.get("nombre", "").casefold()
+
+        for idx, existente in enumerate(self.contactos):
+            email = self._normalizar_email(existente.get("email"))
+            tel = self._normalizar_telefono(existente.get("teléfono"))
+            nombre = existente.get("nombre", "").casefold()
+            if nuevo_email and email and nuevo_email == email:
+                return idx
+            if self._telefonos_equivalentes(nuevo_tel, tel):
+                return idx
+            if not nuevo_email and not nuevo_tel and nuevo_nombre and nuevo_nombre == nombre:
+                return idx
+        return None
+
+    @staticmethod
+    def _fusionar_contactos(existente, nuevo):
+        fusionado = existente.copy()
+        for campo in ("nombre", "teléfono", "email"):
+            if not fusionado.get(campo) and nuevo.get(campo):
+                fusionado[campo] = nuevo[campo]
+        if len(nuevo.get("nombre", "")) > len(fusionado.get("nombre", "")):
+            fusionado["nombre"] = nuevo["nombre"]
+        return fusionado
+
+    def _importar_contactos(self):
+        ruta = filedialog.askopenfilename(
+            title="Importar contactos",
+            filetypes=[
+                ("Contactos Google CSV o Apple vCard", "*.csv *.vcf *.vcard"),
+                ("Google Contacts CSV", "*.csv"),
+                ("Apple Contacts vCard", "*.vcf *.vcard"),
+                ("Todos los archivos", "*.*"),
+            ],
+            parent=self.root,
+        )
+        if not ruta:
+            return
+
+        try:
+            extension = os.path.splitext(ruta)[1].lower()
+            if extension == ".csv":
+                nuevos = self._contactos_desde_google_csv(ruta)
+            elif extension in (".vcf", ".vcard"):
+                nuevos = self._contactos_desde_vcard(ruta)
+            else:
+                messagebox.showwarning("Formato no soportado", "Selecciona un archivo .csv, .vcf o .vcard.", parent=self.root)
+                return
+        except (OSError, csv.Error, UnicodeError) as exc:
+            messagebox.showerror("Error al importar", f"No se pudo leer el archivo:\n{exc}", parent=self.root)
+            return
+
+        if not nuevos:
+            messagebox.showwarning("Sin contactos", "No se encontraron contactos válidos en el archivo.", parent=self.root)
+            return
+
+        añadidos = fusionados = omitidos = 0
+        for nuevo in nuevos:
+            idx = self._indice_duplicado(nuevo)
+            if idx is None:
+                self.contactos.append(nuevo)
+                añadidos += 1
+                continue
+
+            existente = self.contactos[idx]
+            decision = messagebox.askyesnocancel(
+                "Duplicado detectado",
+                "Ya existe un contacto parecido:\n\n"
+                f"Existente: {existente.get('nombre')} | {existente.get('teléfono')} | {existente.get('email')}\n"
+                f"Importado: {nuevo.get('nombre')} | {nuevo.get('teléfono')} | {nuevo.get('email')}\n\n"
+                "Sí: fusionar completando campos vacíos.\n"
+                "No: omitir el contacto importado.\n"
+                "Cancelar: detener la importación.",
+                parent=self.root,
+            )
+            if decision is None:
+                break
+            if decision:
+                self.contactos[idx] = self._fusionar_contactos(existente, nuevo)
+                fusionados += 1
+            else:
+                omitidos += 1
+
+        self._guardar()
+        self._limpiar_formulario()
+        self._actualizar_lista(self.entry_busqueda.get())
+        self._flash_status(f"✓  {añadidos} añadidos, {fusionados} fusionados, {omitidos} omitidos.")
+
     # ── Validación ───────────────────────────────────────────────────────────────
 
     @staticmethod
@@ -72,13 +344,13 @@ class ContactosApp:
         telefono = self.entry_telefono.get().strip()
         email    = self.entry_email.get().strip()
 
-        if not nombre or not telefono or not email:
-            messagebox.showwarning("Campos incompletos", "Todos los campos son obligatorios.", parent=self.root)
+        if not nombre:
+            messagebox.showwarning("Campo obligatorio", "El nombre es obligatorio.", parent=self.root)
             return
-        if not self._email_valido(email):
+        if email and not self._email_valido(email):
             messagebox.showwarning("Email inválido", "Formato esperado: usuario@dominio.ext", parent=self.root)
             return
-        if not self._telefono_valido(telefono):
+        if telefono and not self._telefono_valido(telefono):
             messagebox.showwarning("Teléfono inválido", "Mínimo 6 dígitos. Se permiten: + espacios - ( )", parent=self.root)
             return
 
@@ -315,8 +587,8 @@ class ContactosApp:
         # Campos del formulario
         campos = [
             ("Nombre",   "Ej: Ana García"),
-            ("Teléfono", "Ej: +34 612 345 678"),
-            ("Email",    "Ej: ana@ejemplo.com"),
+            ("Teléfono (opcional)", "Ej: +34 612 345 678"),
+            ("Email (opcional)",    "Ej: ana@ejemplo.com"),
         ]
         entries = []
         for label, hint in campos:
@@ -356,6 +628,12 @@ class ContactosApp:
             form, text="Exportar a CSV →", style="Ghost.TButton",
             command=self._exportar_csv,
         ).pack(fill="x")
+
+        self.btn_importar = ttk.Button(
+            form, text="Importar contactos...", style="Ghost.TButton",
+            command=self._importar_contactos,
+        )
+        self.btn_importar.pack(fill="x", pady=(6, 0))
 
     def _build_table(self, parent):
         right = ttk.Frame(parent, style="Card.TFrame")

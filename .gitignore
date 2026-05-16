@@ -46,3 +46,9 @@ Icon
 # Logs y bases de datos
 *.log
 *.sqlite
+
+# Datos locales sensibles
+contactos.json
+*.csv
+*.vcf
+*.vcard

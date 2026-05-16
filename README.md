@@ -4,12 +4,14 @@ Aplicación de escritorio para gestionar contactos, desarrollada en Python con i
 
 ## Características
 
-- Añadir, editar y eliminar contactos (nombre, teléfono, email)
+- Añadir, editar y eliminar contactos (solo el nombre es obligatorio)
 - Búsqueda en tiempo real por nombre, teléfono o email
 - Indicador visual de modo **Nuevo / Editando**
-- Validación de email y teléfono (admite formatos internacionales: `+34 612 345 678`)
+- Validación de email y teléfono cuando se informan (admite formatos internacionales: `+34 612 345 678`)
 - Exportación a CSV
-- Datos persistidos en `contactos.json` junto al ejecutable
+- Importación de contactos desde Google Contacts (`.csv`) y Apple Contacts (`.vcf` / `.vcard`)
+- Gestión de duplicados al importar con opción de fusionar u omitir
+- Datos persistidos localmente en `contactos.json`; en la app empaquetada se guardan en `~/Library/Application Support/ContactosAPP/`
 - Confirmación al cerrar si hay datos sin guardar
 
 ## Requisitos
@@ -24,6 +26,14 @@ git clone https://github.com/edfrutos/ContactosAPP.git
 cd ContactosAPP
 python contactos_mejorado.py
 ```
+
+## Importar contactos
+
+Exporta tus contactos desde Google Contacts en formato CSV o desde Apple Contacts en formato vCard. En la app, usa **Importar contactos...** y selecciona el archivo `.csv`, `.vcf` o `.vcard`.
+
+`contactos.json` y los archivos exportados (`.csv`, `.vcf`, `.vcard`) están ignorados por Git para evitar publicar datos personales. El empaquetado no incluye datos reales dentro del `.app`.
+
+El repositorio incluye `contactos_example.json` como referencia de estructura sin datos reales.
 
 ## Empaquetar como `.app` para macOS
 

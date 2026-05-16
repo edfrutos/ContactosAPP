@@ -1,11 +1,11 @@
 from setuptools import setup
 
 APP = ['contactos_mejorado.py']
-DATA_FILES = ['contactos.json']  # Opcional
+DATA_FILES = []
 OPTIONS = {
     'iconfile': 'contactos_icon.icns',
     'packages': ['tkinter'],
-    'includes': ['re', 'json', 'csv', 'os']
+    'includes': ['re', 'json', 'csv', 'os', 'sys', 'unicodedata']
 }
 
 

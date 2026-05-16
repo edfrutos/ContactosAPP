@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Qué es este proyecto
 
-Aplicación de escritorio para gestión de contactos, escrita en Python con `tkinter`. Los datos se persisten en `contactos.json` (formato JSON plano). No hay servidor ni base de datos.
+Aplicación de escritorio para gestión de contactos, escrita en Python con `tkinter`. Los contactos se persisten en `contactos.json` (formato JSON plano). No hay servidor ni base de datos.
 
 ## Ejecutar la aplicación
 
@@ -47,9 +47,11 @@ El proyecto mantiene una única variante activa:
 
 Flujo de datos: `contactos.json` → `ContactosApp._cargar()` → `self.contactos` → `ContactosApp._guardar()` → `contactos.json`.
 
+La importación de contactos soporta Google Contacts en CSV y Apple Contacts en vCard (`.vcf` / `.vcard`). Los duplicados se detectan por email o teléfono normalizados y se pide confirmación para fusionar u omitir.
+
 ## Datos
 
-`contactos.json` se lee y escribe junto al script mediante una ruta absoluta basada en `__file__`, independiente del directorio de trabajo. Cada contacto tiene tres campos: `nombre`, `teléfono`, `email`. Al guardar, la lista se ordena alfabéticamente por nombre.
+En desarrollo, `contactos.json` se lee y escribe junto al script mediante una ruta absoluta basada en `__file__`, independiente del directorio de trabajo. En la app empaquetada con `py2app`, se guarda en `~/Library/Application Support/ContactosAPP/contactos.json` para no escribir dentro del `.app`. Cada contacto tiene tres campos: `nombre`, `teléfono`, `email`; solo `nombre` es obligatorio. Este archivo contiene datos personales y debe permanecer ignorado por Git.
 
 ## Sin tests
 
