@@ -35,6 +35,8 @@ Exporta tus contactos desde Google Contacts en formato CSV o desde Apple Contact
 
 En duplicados, los campos vacíos locales se completan siempre con el dato importado. Si hay conflicto entre valores locales e importados, puedes fusionar un contacto, fusionar todos, guardar ambos como contactos separados y elegir si prevalece el dato local o el importado.
 
+La importación descarta columnas técnicas o auxiliares (`X-*`, `Address N - ...`, `Event N - ...`, `Relation N - ...`, labels de teléfono/web y campos repetidos de bajo valor como `teléfono 5+` o `email 3+`).
+
 `contactos.json` y los archivos exportados (`.csv`, `.vcf`, `.vcard`) están ignorados por Git para evitar publicar datos personales. El empaquetado no incluye datos reales dentro del `.app`.
 
 El repositorio incluye `contactos_example.json` como referencia de estructura sin datos reales.

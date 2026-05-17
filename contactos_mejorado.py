@@ -18,6 +18,8 @@ def _ruta_contactos():
 
 CONTACTOS_FILE = _ruta_contactos()
 BASE_FIELDS = ("nombre", "teléfono", "email")
+MAX_EXTRA_PHONES = 4
+MAX_EXTRA_EMAILS = 2
 
 COLORS = {
     "bg":           "#F5F7FA",
@@ -71,12 +73,12 @@ class ContactosApp:
         with open(CONTACTOS_FILE, "w", encoding="utf-8") as f:
             json.dump(self.contactos, f, indent=4, ensure_ascii=False)
 
-    @staticmethod
-    def _campos_desde_contactos(contactos):
+    @classmethod
+    def _campos_desde_contactos(cls, contactos):
         campos = list(BASE_FIELDS)
         for contacto in contactos:
             for campo in contacto:
-                if campo not in campos:
+                if campo not in campos and not cls._campo_importado_ignorado(campo):
                     campos.append(campo)
         return campos
 
@@ -158,10 +160,59 @@ class ContactosApp:
         texto = texto.casefold().strip()
         return re.sub(r"[\s_]+", " ", texto)
 
+    @staticmethod
+    def _numero_campo_repetido(campo_norm, prefijos):
+        for prefijo in prefijos:
+            match = re.search(rf"\b{re.escape(prefijo)}\s*(\d+)\b", campo_norm)
+            if match:
+                return int(match.group(1))
+        return None
+
+    @classmethod
+    def _campo_importado_ignorado(cls, campo, para_busqueda=False):
+        campo_norm = cls._normalizar_cabecera_csv(campo).replace("-", " ")
+        if campo_norm.startswith("x "):
+            return True
+
+        if re.search(r"\b(label|etiqueta|lat|latitude|long|longitude)\b", campo_norm):
+            return True
+
+        if re.match(r"^(address|direccion|dirección|event|evento|relation|relacion|relación)\s+\d+\b", campo_norm):
+            return True
+
+        if re.match(r"^website\s+[2-9]\d*\b", campo_norm):
+            return True
+
+        if campo_norm == "organization":
+            return True
+
+        telefono_num = cls._numero_campo_repetido(campo_norm, ("telefono", "phone"))
+        if (
+            not para_busqueda
+            and telefono_num is not None
+            and re.search(r"\b(value|valor|formatted|formateado)\b", campo_norm)
+        ):
+            return True
+        if telefono_num is not None and (
+            telefono_num > MAX_EXTRA_PHONES or (
+                telefono_num > 2 and re.search(r"\b(value|valor|formatted|formateado)\b", campo_norm)
+            )
+        ):
+            return True
+        email_num = cls._numero_campo_repetido(campo_norm, ("email", "e mail", "correo electronico"))
+        if email_num is not None and email_num > MAX_EXTRA_EMAILS:
+            return True
+        return (
+            not para_busqueda
+            and email_num is not None
+            and re.search(r"\b(value|valor)\b", campo_norm)
+        )
+
     def _primer_valor_csv(self, row, exactos=(), contiene=()):
         valores = [
             (self._normalizar_cabecera_csv(clave), (valor or "").strip())
             for clave, valor in row.items()
+            if not self._campo_importado_ignorado(clave, para_busqueda=True)
         ]
         for buscado in exactos:
             buscado_norm = self._normalizar_cabecera_csv(buscado)
@@ -238,6 +289,8 @@ class ContactosApp:
                 "last name", "apellidos",
             }:
                 continue
+            if self._campo_importado_ignorado(campo):
+                continue
             if valor in (contacto.get("teléfono"), contacto.get("email")):
                 continue
             if campo not in contacto:
@@ -266,9 +319,13 @@ class ContactosApp:
                 )
                 if contacto:
                     for i, telefono in enumerate(telefonos[1:], start=2):
-                        contacto[f"teléfono {i}"] = telefono
+                        campo = f"teléfono {i}"
+                        if not self._campo_importado_ignorado(campo):
+                            contacto[campo] = telefono
                     for i, email in enumerate(emails[1:], start=2):
-                        contacto[f"email {i}"] = email
+                        campo = f"email {i}"
+                        if not self._campo_importado_ignorado(campo):
+                            contacto[campo] = email
                     for campo, valor in actual.get("extras", {}).items():
                         contacto[campo] = valor
                     contactos.append(contacto)
@@ -299,7 +356,7 @@ class ContactosApp:
                 actual.setdefault("email", []).append(valor)
             elif clave_base not in {"BEGIN", "END", "VERSION", "PRODID"}:
                 campo = self._campo_extra_vcard(clave_base)
-                if campo and valor:
+                if campo and valor and not self._campo_importado_ignorado(campo):
                     actual.setdefault("extras", {}).setdefault(campo, valor)
         return contactos
 
