@@ -5,13 +5,14 @@ Aplicación de escritorio para gestionar contactos, desarrollada en Python con i
 ## Características
 
 - Añadir, editar y eliminar contactos (solo el nombre es obligatorio)
-- Búsqueda en tiempo real por nombre, teléfono o email
+- Búsqueda en tiempo real por nombre, teléfono o email, con botón para limpiar el filtro
 - Indicador visual de modo **Nuevo / Editando**
 - Validación de email y teléfono cuando se informan (admite formatos internacionales: `+34 612 345 678`)
 - Exportación a CSV
 - Importación de contactos desde Google Contacts (`.csv`) y Apple Contacts (`.vcf` / `.vcard`)
 - Gestión de duplicados al importar con opción de fusionar, fusionar todo, guardar ambos u omitir
 - Ampliación automática del esquema cuando el archivo importado trae campos nuevos
+- Edición de campos importados dinámicos, ordenación por columnas y desplazamiento horizontal del listado
 - Datos persistidos localmente en `contactos.json`; en la app empaquetada se guardan en `~/Library/Application Support/ContactosAPP/`
 - Confirmación al cerrar si hay datos sin guardar
 

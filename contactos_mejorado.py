@@ -45,6 +45,10 @@ class ContactosApp:
         self.root = root
         self.contactos = self._cargar()
         self.campos = self._asegurar_campos(self.contactos)
+        self.extra_entries = {}
+        self._extra_fields_actuales = ()
+        self._orden_columna = "nombre"
+        self._orden_desc = False
         self._modo_edicion = False
         self._idx_edicion = None  # índice real en self.contactos
 
@@ -89,6 +93,8 @@ class ContactosApp:
             for campo in campos:
                 contacto.setdefault(campo, "")
         self.campos = campos
+        if hasattr(self, "extra_fields_frame"):
+            self._reconstruir_campos_extra()
 
     # ── Importación de contactos ────────────────────────────────────────────────
 
@@ -539,11 +545,15 @@ class ContactosApp:
         if self._modo_edicion and self._idx_edicion is not None:
             contacto = self.contactos[self._idx_edicion].copy()
             contacto.update({"nombre": nombre, "teléfono": telefono, "email": email})
+            for campo, entry in self.extra_entries.items():
+                contacto[campo] = entry.get().strip()
             self.contactos[self._idx_edicion] = contacto
             self._flash_status(f"✓  '{nombre}' actualizado correctamente.")
         else:
             contacto = {campo: "" for campo in self.campos}
             contacto.update({"nombre": nombre, "teléfono": telefono, "email": email})
+            for campo, entry in self.extra_entries.items():
+                contacto[campo] = entry.get().strip()
             self.contactos.append(contacto)
             self._flash_status(f"✓  '{nombre}' añadido correctamente.")
 
@@ -589,6 +599,7 @@ class ContactosApp:
 
     def _actualizar_lista(self, filtro=""):
         self.campos = self._asegurar_campos(self.contactos)
+        self._reconstruir_campos_extra()
         self._configurar_columnas_lista()
         self.lista.delete(*self.lista.get_children())
         filtro_l = filtro.lower()
@@ -607,10 +618,35 @@ class ContactosApp:
         if tuple(self.lista["columns"]) != columnas:
             self.lista.configure(columns=columnas, displaycolumns=self.campos)
         for campo in self.campos:
-            self.lista.heading(campo, text=campo[:1].upper() + campo[1:], anchor="w")
+            titulo = campo[:1].upper() + campo[1:]
+            if campo == self._orden_columna:
+                titulo += " ↓" if self._orden_desc else " ↑"
+            self.lista.heading(
+                campo,
+                text=titulo,
+                anchor="w",
+                command=lambda c=campo: self._ordenar_por_columna(c),
+            )
             ancho = 170 if campo == "nombre" else 145
             self.lista.column(campo, width=ancho, stretch=True, minwidth=90, anchor="w")
         self.lista.column("_idx", width=0, stretch=False, minwidth=0)
+
+    def _ordenar_por_columna(self, campo):
+        if self._orden_columna == campo:
+            self._orden_desc = not self._orden_desc
+        else:
+            self._orden_columna = campo
+            self._orden_desc = False
+
+        def clave(contacto):
+            valor = str(contacto.get(campo, "")).strip()
+            campo_norm = self._normalizar_cabecera_csv(campo)
+            if "telefono" in campo_norm or "phone" in campo_norm or "movil" in campo_norm:
+                return self._normalizar_telefono(valor) or valor.casefold()
+            return valor.casefold()
+
+        self.contactos.sort(key=clave, reverse=self._orden_desc)
+        self._actualizar_lista(self.entry_busqueda.get())
 
     def _seleccionar_contacto(self, _event=None):
         item = self.lista.focus()
@@ -624,6 +660,9 @@ class ContactosApp:
         ):
             entry.delete(0, tk.END)
             entry.insert(0, valor)
+        for campo, entry in self.extra_entries.items():
+            entry.delete(0, tk.END)
+            entry.insert(0, c.get(campo, ""))
         self._modo_edicion = True
         self._idx_edicion = idx
         self._refrescar_modo()
@@ -631,6 +670,8 @@ class ContactosApp:
     def _limpiar_formulario(self):
         for e in (self.entry_nombre, self.entry_telefono, self.entry_email):
             e.delete(0, tk.END)
+        for entry in self.extra_entries.values():
+            entry.delete(0, tk.END)
         self._modo_edicion = False
         self._idx_edicion = None
         self.lista.selection_remove(*self.lista.selection())
@@ -640,7 +681,7 @@ class ContactosApp:
         if self._modo_edicion:
             self.btn_guardar.config(text="💾  Guardar cambios")
             self.lbl_modo.config(text="  EDITANDO  ", bg=COLORS["warning"])
-            self.btn_cancelar.pack(fill="x", pady=(0, 6))
+            self.btn_cancelar.pack(fill="x", pady=(0, 6), after=self.btn_guardar)
         else:
             self.btn_guardar.config(text="➕  Añadir contacto")
             self.lbl_modo.config(text="  NUEVO  ", bg=COLORS["success"])
@@ -654,7 +695,8 @@ class ContactosApp:
         self.root.after(4000, lambda: self.lbl_status.config(text="", fg=COLORS["text_muted"]))
 
     def _on_close(self):
-        tiene_datos = any(e.get().strip() for e in (self.entry_nombre, self.entry_telefono, self.entry_email))
+        entradas = (self.entry_nombre, self.entry_telefono, self.entry_email, *self.extra_entries.values())
+        tiene_datos = any(e.get().strip() for e in entradas)
         if tiene_datos:
             if not messagebox.askyesno(
                 "Cerrar aplicación",
@@ -769,9 +811,28 @@ class ContactosApp:
     def _build_form(self, parent):
         form = ttk.Frame(parent, style="Card.TFrame", padding=(0, 0, 20, 0))
         form.grid(row=0, column=0, sticky="nsew")
+        form.columnconfigure(0, weight=1)
+        form.rowconfigure(0, weight=1)
+
+        self.form_canvas = tk.Canvas(
+            form,
+            bg=COLORS["panel"],
+            bd=0,
+            highlightthickness=0,
+        )
+        self.form_scroll = ttk.Scrollbar(form, orient="vertical", command=self.form_canvas.yview)
+        self.form_fields = tk.Frame(self.form_canvas, bg=COLORS["panel"])
+        self.form_window = self.form_canvas.create_window((0, 0), window=self.form_fields, anchor="nw")
+        self.form_canvas.configure(yscrollcommand=self.form_scroll.set)
+        self.form_canvas.grid(row=0, column=0, sticky="nsew")
+        self.form_scroll.grid(row=0, column=1, sticky="ns", padx=(4, 0))
+        self.form_fields.bind("<Configure>", self._actualizar_scroll_formulario)
+        self.form_canvas.bind("<Configure>", self._ajustar_ancho_formulario)
+        self.form_canvas.bind("<Enter>", self._activar_scroll_formulario)
+        self.form_canvas.bind("<Leave>", self._desactivar_scroll_formulario)
 
         # Indicador de modo (NUEVO / EDITANDO)
-        top = tk.Frame(form, bg=COLORS["panel"])
+        top = tk.Frame(self.form_fields, bg=COLORS["panel"])
         top.pack(fill="x", pady=(0, 16))
         self.lbl_modo = tk.Label(
             top, text="  NUEVO  ",
@@ -788,48 +849,111 @@ class ContactosApp:
         ]
         entries = []
         for label, hint in campos:
-            fila = tk.Frame(form, bg=COLORS["panel"])
+            fila = tk.Frame(self.form_fields, bg=COLORS["panel"])
             fila.pack(fill="x", pady=(4, 2))
             tk.Label(fila, text=label, bg=COLORS["panel"], fg=COLORS["text"],
                      font=("Helvetica Neue", 11, "bold")).pack(side="left")
             tk.Label(fila, text=hint, bg=COLORS["panel"], fg="#CBD5E1",
                      font=("Helvetica Neue", 9)).pack(side="left", padx=(8, 0))
-            entry = ttk.Entry(form, width=30)
+            entry = ttk.Entry(self.form_fields, width=30)
             entry.pack(fill="x", pady=(0, 8))
             entries.append(entry)
         self.entry_nombre, self.entry_telefono, self.entry_email = entries
 
-        ttk.Separator(form, orient="horizontal").pack(fill="x", pady=14)
+        self.extra_fields_title = tk.Label(
+            self.form_fields, text="Campos importados", bg=COLORS["panel"], fg=COLORS["text_muted"],
+            font=("Helvetica Neue", 10, "bold"),
+        )
+        self.extra_fields_frame = tk.Frame(self.form_fields, bg=COLORS["panel"])
+        self._reconstruir_campos_extra()
+
+        actions = tk.Frame(form, bg=COLORS["panel"])
+        actions.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(14, 0))
+
+        ttk.Separator(actions, orient="horizontal").pack(fill="x", pady=(0, 14))
 
         self.btn_guardar = ttk.Button(
-            form, text="➕  Añadir contacto", style="Primary.TButton",
+            actions, text="➕  Añadir contacto", style="Primary.TButton",
             command=self._guardar_contacto,
         )
         self.btn_guardar.pack(fill="x", pady=(0, 6))
 
         self.btn_cancelar = ttk.Button(
-            form, text="Cancelar edición", style="Secondary.TButton",
+            actions, text="Cancelar edición", style="Secondary.TButton",
             command=self._limpiar_formulario,
         )
         # Se muestra/oculta dinámicamente con pack/pack_forget
 
-        ttk.Separator(form, orient="horizontal").pack(fill="x", pady=14)
+        ttk.Separator(actions, orient="horizontal").pack(fill="x", pady=14)
 
         ttk.Button(
-            form, text="🗑  Eliminar seleccionado", style="Danger.TButton",
+            actions, text="🗑  Eliminar seleccionado", style="Danger.TButton",
             command=self._eliminar_contacto,
         ).pack(fill="x", pady=(0, 6))
 
         ttk.Button(
-            form, text="Exportar a CSV →", style="Ghost.TButton",
+            actions, text="Exportar a CSV →", style="Ghost.TButton",
             command=self._exportar_csv,
         ).pack(fill="x")
 
         self.btn_importar = ttk.Button(
-            form, text="Importar contactos...", style="Ghost.TButton",
+            actions, text="Importar contactos...", style="Ghost.TButton",
             command=self._importar_contactos,
         )
         self.btn_importar.pack(fill="x", pady=(6, 0))
+
+    def _reconstruir_campos_extra(self):
+        if not hasattr(self, "extra_fields_frame"):
+            return
+        extras = tuple(campo for campo in self.campos if campo not in BASE_FIELDS)
+        if extras == self._extra_fields_actuales:
+            return
+        self._extra_fields_actuales = extras
+        for widget in self.extra_fields_frame.winfo_children():
+            widget.destroy()
+        self.extra_entries = {}
+
+        if not extras:
+            self.extra_fields_title.pack_forget()
+            self.extra_fields_frame.pack_forget()
+            return
+
+        self.extra_fields_title.pack(anchor="w", pady=(8, 4))
+        self.extra_fields_frame.pack(fill="x", pady=(0, 8))
+        for campo in extras:
+            fila = tk.Frame(self.extra_fields_frame, bg=COLORS["panel"])
+            fila.pack(fill="x", pady=(4, 2))
+            tk.Label(
+                fila,
+                text=campo[:1].upper() + campo[1:],
+                bg=COLORS["panel"],
+                fg=COLORS["text"],
+                font=("Helvetica Neue", 10, "bold"),
+            ).pack(anchor="w")
+            entry = ttk.Entry(self.extra_fields_frame, width=30)
+            entry.pack(fill="x", pady=(0, 4))
+            self.extra_entries[campo] = entry
+        self._actualizar_scroll_formulario()
+
+    def _actualizar_scroll_formulario(self, _event=None):
+        if hasattr(self, "form_canvas"):
+            self.form_canvas.configure(scrollregion=self.form_canvas.bbox("all"))
+
+    def _ajustar_ancho_formulario(self, event):
+        if hasattr(self, "form_window"):
+            self.form_canvas.itemconfigure(self.form_window, width=event.width)
+
+    def _activar_scroll_formulario(self, _event=None):
+        self.root.bind_all("<MouseWheel>", self._scroll_formulario)
+
+    def _desactivar_scroll_formulario(self, _event=None):
+        self.root.unbind_all("<MouseWheel>")
+
+    def _scroll_formulario(self, event):
+        if not hasattr(self, "form_canvas"):
+            return
+        pasos = -1 if event.delta > 0 else 1
+        self.form_canvas.yview_scroll(pasos, "units")
 
     def _build_table(self, parent):
         right = ttk.Frame(parent, style="Card.TFrame")
@@ -848,9 +972,18 @@ class ContactosApp:
         self.entry_busqueda.grid(row=0, column=1, sticky="ew", ipady=4)
         self.entry_busqueda.bind("<KeyRelease>", self._buscar)
 
+        self.btn_limpiar_busqueda = ttk.Button(
+            search_row,
+            text="X",
+            style="Ghost.TButton",
+            width=3,
+            command=self._limpiar_busqueda,
+        )
+        self.btn_limpiar_busqueda.grid(row=0, column=2, padx=(6, 0))
+
         self.lbl_total = tk.Label(search_row, text="", bg=COLORS["panel"], fg=COLORS["text_muted"],
                                    font=("Helvetica Neue", 10))
-        self.lbl_total.grid(row=0, column=2, padx=(10, 0))
+        self.lbl_total.grid(row=0, column=3, padx=(10, 0))
 
         # Tabla
         tree_frame = ttk.Frame(right, style="Card.TFrame")
@@ -879,7 +1012,14 @@ class ContactosApp:
 
         sb = ttk.Scrollbar(tree_frame, orient="vertical", command=self.lista.yview)
         sb.grid(row=0, column=1, sticky="ns")
-        self.lista.configure(yscrollcommand=sb.set)
+        sb_horizontal = ttk.Scrollbar(tree_frame, orient="horizontal", command=self.lista.xview)
+        sb_horizontal.grid(row=1, column=0, sticky="ew")
+        self.lista.configure(yscrollcommand=sb.set, xscrollcommand=sb_horizontal.set)
+
+    def _limpiar_busqueda(self):
+        self.entry_busqueda.delete(0, tk.END)
+        self._actualizar_lista()
+        self.entry_busqueda.focus_set()
 
     def _build_statusbar(self):
         tk.Frame(self.root, bg=COLORS["border"], height=1).grid(row=2, column=0, sticky="ew")

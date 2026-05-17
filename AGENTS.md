@@ -63,6 +63,8 @@ There is no automated test suite. Before submitting changes, manually verify:
 - Apple Contacts vCard import.
 - Duplicate import handling: merge one, merge all, keep both, or skip with user confirmation.
 - Dynamic JSON fields when imports include columns outside `nombre`, `teléfono`, and `email`.
+- Dynamic imported fields must remain editable and visible as sortable table columns.
+- Contact list horizontal scrolling and the search clear action.
 - Closing behavior with unsaved form data.
 
 If tests are added later, place them under `tests/` and use descriptive names like `test_contact_validation.py`.
