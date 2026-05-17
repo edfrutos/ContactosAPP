@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 
 # Configuración
 APP_NAME="contactos_mejorado"
@@ -52,5 +53,10 @@ CMD+=("dist/")
 
 echo "🚀 Ejecutando creación del .dmg..."
 "${CMD[@]}"
+
+if [ ! -s "$DMG_NAME" ]; then
+    echo "❌ No se generó el archivo '$DMG_NAME'."
+    exit 1
+fi
 
 echo "✅ Proceso completado. Revisa el archivo '$DMG_NAME'"
